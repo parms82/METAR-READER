@@ -98,14 +98,37 @@ http://127.0.0.1:5000
 
 ---
 
+## Running the Tests
+
+The project includes a suite of 70 unit and route tests. No network connection is required — all API calls are mocked.
+
+```bash
+pytest tests/ -v
+```
+
+### What is tested
+
+| Group | Tests | Coverage |
+|-------|-------|----------|
+| Conversions | 12 | °C → °F, knots → mph, hPa → inHg, compass directions |
+| Sky conditions | 8 | Clear codes, single layers, multiple layers with altitudes |
+| Weather phenomena | 12 | Rain, snow, fog, thunderstorms, freezing rain, combined codes |
+| METAR decoder | 29 | 5 mock scenarios: clear/calm, cloudy/gusty, rain+IFR, fog+LIFR, snow+MVFR |
+| Flask routes | 9 | Page load, form validation, mocked API responses, error handling |
+
+---
+
 ## Project Structure
 
 ```
 METAR-READER/
 ├── app.py               # Flask application and METAR decoder
+├── conftest.py          # Pytest path configuration
 ├── requirements.txt     # Python dependencies
 ├── templates/
 │   └── index.html       # Front-end UI
+├── tests/
+│   └── test_app.py      # Unit and route tests
 └── README.md
 ```
 
