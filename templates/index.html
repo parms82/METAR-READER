@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>METAR Reader — Airport Weather in Plain English</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --sky:    #0ea5e9;
+      --sky-dk: #0369a1;
+      --card:   #ffffff;
+      --bg:     #f0f9ff;
+      --text:   #0f172a;
+      --muted:  #64748b;
+      --border: #e2e8f0;
+      --green:  #16a34a;
+      --blue:   #2563eb;
+      --red:    #dc2626;
+      --purple: #7c3aed;
+      --radius: 14px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, var(--sky-dk) 0%, var(--sky) 100%);
+      color: #fff;
+      padding: 2.5rem 1rem 3.5rem;
+      text-align: center;
+    }
+    header h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.5px; }
+    header p  { margin-top: .4rem; opacity: .85; font-size: 1rem; }
+
+    /* ── Search card ── */
+    .search-wrap {
+      max-width: 540px;
+      margin: -2rem auto 0;
+      padding: 0 1rem;
+    }
+    .search-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 24px rgba(0,0,0,.12);
+      padding: 1.5rem;
+    }
+    .search-row {
+      display: flex;
+      gap: .6rem;
+    }
+    .search-row input {
+      flex: 1;
+      padding: .75rem 1rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .search-row input:focus { border-color: var(--sky); }
+    .search-row input::placeholder { letter-spacing: 0; font-weight: 400; color: #94a3b8; }
+    .search-row button {
+      padding: .75rem 1.4rem;
+      background: var(--sky);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    .search-row button:hover { background: var(--sky-dk); }
+    .search-hint {
+      margin-top: .75rem;
+      font-size: .82rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .search-hint code {
+      background: #f1f5f9;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: .82rem;
+    }
+
+    /* ── Error ── */
+    .error-box {
+      max-width: 700px;
+      margin: 1.5rem auto;
+      padding: 0 1rem;
+    }
+    .error-msg {
+      background: #fff1f2;
+      border: 1px solid #fecaca;
+      border-radius: var(--radius);
+      padding: 1rem 1.2rem;
+      color: #b91c1c;
+      font-size: .95rem;
+    }
+
+    /* ── Results ── */
+    .results {
+      max-width: 700px;
+      margin: 1.5rem auto 3rem;
+      padding: 0 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    /* Headline card */
+    .headline-card {
+      background: linear-gradient(135deg, var(--sky-dk), var(--sky));
+      color: #fff;
+      border-radius: var(--radius);
+      padding: 1.6rem 1.8rem;
+    }
+    .headline-card .station-name {
+      font-size: .85rem;
+      opacity: .8;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .headline-card .station-id {
+      font-size: 2.2rem;
+      font-weight: 800;
+      line-height: 1;
+      margin: .15rem 0 .4rem;
+    }
+    .headline-card .headline-text {
+      font-size: 1.1rem;
+      font-weight: 500;
+      line-height: 1.5;
+      opacity: .95;
+    }
+    .headline-card .obs-time {
+      margin-top: .8rem;
+      font-size: .8rem;
+      opacity: .7;
+    }
+
+    /* Flight category badge */
+    .cat-badge {
+      display: inline-block;
+      padding: .25rem .8rem;
+      border-radius: 999px;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .5px;
+      margin-top: .6rem;
+      background: rgba(255,255,255,.2);
+      color: #fff;
+    }
+
+    /* Detail grid */
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+    .detail-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.2rem;
+    }
+    .detail-card .label {
+      font-size: .75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--muted);
+      margin-bottom: .45rem;
+    }
+    .detail-card .value {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.4;
+    }
+    .detail-card .sub-value {
+      font-size: .82rem;
+      color: var(--muted);
+      margin-top: .25rem;
+    }
+
+    /* Flight category detail card */
+    .cat-green { border-left: 4px solid var(--green); }
+    .cat-blue  { border-left: 4px solid var(--blue); }
+    .cat-red   { border-left: 4px solid var(--red); }
+    .cat-purple{ border-left: 4px solid var(--purple); }
+    .cat-green .cat-label { color: var(--green); }
+    .cat-blue  .cat-label { color: var(--blue); }
+    .cat-red   .cat-label { color: var(--red); }
+    .cat-purple .cat-label { color: var(--purple); }
+
+    /* Raw METAR */
+    .raw-card {
+      background: #1e293b;
+      border-radius: var(--radius);
+      padding: 1.2rem 1.4rem;
+    }
+    .raw-card .raw-label {
+      font-size: .75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: #64748b;
+      margin-bottom: .5rem;
+    }
+    .raw-card .raw-text {
+      font-family: "SF Mono", "Consolas", monospace;
+      font-size: .9rem;
+      color: #7dd3fc;
+      word-break: break-all;
+      line-height: 1.6;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--muted);
+    }
+    .empty-state .icon { font-size: 3rem; margin-bottom: .75rem; }
+    .empty-state p { font-size: 1rem; }
+
+    @media (max-width: 500px) {
+      header h1 { font-size: 1.5rem; }
+      .detail-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>&#9925; METAR Reader</h1>
+  <p>Real airport weather, decoded into plain English</p>
+</header>
+
+<div class="search-wrap">
+  <div class="search-card">
+    <form method="POST" action="/">
+      <div class="search-row">
+        <input
+          type="text"
+          name="airport_code"
+          placeholder="Enter airport code (e.g. KHIO)"
+          value="{{ airport_code }}"
+          maxlength="4"
+          autocomplete="off"
+          autofocus
+        />
+        <button type="submit">Get Weather</button>
+      </div>
+    </form>
+    <p class="search-hint">
+      Use 4-letter ICAO codes: <code>KLAX</code> &nbsp;<code>KJFK</code> &nbsp;<code>KORD</code> &nbsp;<code>KHIO</code><br>
+      3-letter US codes also work: <code>LAX</code> &nbsp;<code>JFK</code>
+    </p>
+  </div>
+</div>
+
+{% if error %}
+<div class="error-box">
+  <div class="error-msg">&#9888;&#65039; {{ error }}</div>
+</div>
+{% endif %}
+
+{% if weather %}
+<div class="results">
+
+  <!-- Headline -->
+  <div class="headline-card">
+    {% if weather.name %}<div class="station-name">{{ weather.name }}</div>{% endif %}
+    <div class="station-id">{{ weather.station }}</div>
+    <div class="headline-text">{{ weather.headline }}</div>
+    {% if weather.flight_category %}
+    <div class="cat-badge">{{ weather.flight_category }} — {{ weather.flight_category_desc }}</div>
+    {% endif %}
+    {% if weather.time %}<div class="obs-time">Observed: {{ weather.time }}</div>{% endif %}
+  </div>
+
+  <!-- Detail cards grid -->
+  <div class="detail-grid">
+
+    {% if weather.temp_f is defined %}
+    <div class="detail-card">
+      <div class="label">&#127777;&#65039; Temperature</div>
+      <div class="value">{{ weather.temp_f }}°F</div>
+      <div class="sub-value">{{ weather.temp_c }}°C</div>
+    </div>
+    {% endif %}
+
+    {% if weather.dewp_f is defined %}
+    <div class="detail-card">
+      <div class="label">&#128167; Dewpoint</div>
+      <div class="value">{{ weather.dewp_f }}°F</div>
+      <div class="sub-value">{{ weather.dewp_c }}°C
+        {% if weather.humidity_note %} &middot; {{ weather.humidity_note }}{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if weather.wind %}
+    <div class="detail-card">
+      <div class="label">&#127788;&#65039; Wind</div>
+      <div class="value">{{ weather.wind }}</div>
+    </div>
+    {% endif %}
+
+    {% if weather.visibility %}
+    <div class="detail-card">
+      <div class="label">&#128065;&#65039; Visibility</div>
+      <div class="value">{{ weather.visibility }}</div>
+    </div>
+    {% endif %}
+
+    <div class="detail-card">
+      <div class="label">&#9729;&#65039; Sky Conditions</div>
+      <div class="value">{{ weather.sky }}</div>
+    </div>
+
+    {% if weather.phenomena %}
+    <div class="detail-card">
+      <div class="label">&#127783;&#65039; Weather</div>
+      <div class="value">{{ weather.phenomena | capitalize }}</div>
+    </div>
+    {% endif %}
+
+    {% if weather.pressure %}
+    <div class="detail-card">
+      <div class="label">&#128218; Pressure</div>
+      <div class="value">{{ weather.pressure }}</div>
+      {% if weather.pressure_note %}
+      <div class="sub-value">{{ weather.pressure_note }}</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if weather.flight_category %}
+    <div class="detail-card cat-{{ weather.flight_category_color }}">
+      <div class="label">&#9992;&#65039; Flying Conditions</div>
+      <div class="value cat-label">{{ weather.flight_category }}</div>
+      <div class="sub-value">{{ weather.flight_category_desc }}</div>
+    </div>
+    {% endif %}
+
+  </div>
+
+  <!-- Raw METAR -->
+  {% if weather.raw %}
+  <div class="raw-card">
+    <div class="raw-label">Raw METAR</div>
+    <div class="raw-text">{{ weather.raw }}</div>
+  </div>
+  {% endif %}
+
+</div>
+
+{% elif not error %}
+<div class="empty-state">
+  <div class="icon">&#9925;</div>
+  <p>Enter an airport code above to get the current weather report.</p>
+</div>
+{% endif %}
+
+</body>
+</html>
