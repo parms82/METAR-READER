@@ -1,3 +1,9 @@
+"""
+METAR Reader — Flask web application
+Fetches live METAR reports from aviationweather.gov and converts them
+into plain-English weather summaries.
+"""
+
 from flask import Flask, render_template, request
 import requests
 from datetime import datetime
@@ -7,19 +13,25 @@ app = Flask(__name__)
 METAR_API_URL = "https://aviationweather.gov/api/data/metar"
 
 
+# ── Unit conversions ──────────────────────────────────────────────────────────
+
 def celsius_to_fahrenheit(c):
+    """Convert Celsius to Fahrenheit, rounded to one decimal place."""
     return round(c * 9 / 5 + 32, 1)
 
 
 def knots_to_mph(knots):
+    """Convert knots to miles per hour."""
     return round(knots * 1.15078)
 
 
 def hpa_to_inhg(hpa):
+    """Convert hectopascals (millibars) to inches of mercury."""
     return round(hpa / 33.8639, 2)
 
 
 def degrees_to_compass(degrees):
+    """Convert a wind direction in degrees to a 16-point compass label."""
     if degrees is None:
         return "variable direction"
     directions = [
@@ -31,10 +43,15 @@ def degrees_to_compass(degrees):
     return directions[round(degrees / 22.5) % 16]
 
 
+# ── METAR field decoders ──────────────────────────────────────────────────────
+
 def decode_sky_conditions(cover, clouds):
     """
-    cover  – highest-cover code string (e.g. 'CLR', 'BKN')
-    clouds – list of {'cover': 'FEW', 'base': 5000} dicts
+    Return a plain-English sky condition string.
+
+    Args:
+        cover:  Highest-coverage code from the API (e.g. 'CLR', 'BKN').
+        clouds: List of dicts with 'cover' and 'base' keys for each layer.
     """
     if cover in ("SKC", "CLR", "NSC", "NCD") or (cover is None and not clouds):
         return "Clear skies"
@@ -63,28 +80,31 @@ def decode_sky_conditions(cover, clouds):
 
 
 def decode_wx_string(wx):
+    """
+    Decode a METAR present-weather string (e.g. '-RA', 'TSRA', 'FG') into
+    a human-readable description.  Returns None when wx is absent.
+    """
     if not wx:
         return None
 
-    intensity_map  = {"-": "light ",   "+": "heavy ",  "VC": "nearby "}
+    intensity_map = {"-": "light ", "+": "heavy ", "VC": "nearby "}
     descriptor_map = {
-        "MI": "shallow ",    "PR": "partial ",     "BC": "patches of ",
-        "DR": "low drifting ","BL": "blowing ",     "SH": "shower of ",
+        "MI": "shallow ",     "PR": "partial ",    "BC": "patches of ",
+        "DR": "low drifting ", "BL": "blowing ",    "SH": "shower of ",
         "TS": "thunderstorm with ", "FZ": "freezing ",
     }
     precip_map = {
-        "DZ": "drizzle",  "RA": "rain",       "SN": "snow",
+        "DZ": "drizzle",   "RA": "rain",        "SN": "snow",
         "SG": "snow grains","IC": "ice crystals","PL": "ice pellets",
-        "GR": "hail",     "GS": "small hail", "UP": "unknown precipitation",
+        "GR": "hail",      "GS": "small hail",  "UP": "unknown precipitation",
     }
     obscure_map = {
-        "BR": "mist",   "FG": "fog",     "FU": "smoke",
-        "VA": "volcanic ash","DU": "dust","SA": "sand",
-        "HZ": "haze",   "PY": "spray",
+        "BR": "mist",  "FG": "fog",   "FU": "smoke",     "VA": "volcanic ash",
+        "DU": "dust",  "SA": "sand",  "HZ": "haze",       "PY": "spray",
     }
     other_map = {
-        "PO": "dust devils", "SQ": "squalls",
-        "FC": "tornado/waterspout", "SS": "sandstorm", "DS": "dust storm",
+        "PO": "dust devils",       "SQ": "squalls",
+        "FC": "tornado/waterspout","SS": "sandstorm", "DS": "dust storm",
     }
 
     all_phenomena = {**precip_map, **obscure_map, **other_map}
@@ -111,22 +131,38 @@ def decode_wx_string(wx):
     return ", ".join(decoded)
 
 
+# Maps API fltCat codes to (description, CSS colour name)
 FLIGHT_CATEGORIES = {
-    "VFR":  ("Good flying conditions — clear and visible",             "green"),
-    "MVFR": ("Marginal — reduced visibility or ceiling",               "blue"),
-    "IFR":  ("Poor conditions — instruments required",                 "red"),
-    "LIFR": ("Very poor conditions — extremely low visibility",        "purple"),
+    "VFR":  ("Good flying conditions — clear and visible",          "green"),
+    "MVFR": ("Marginal — reduced visibility or ceiling",            "blue"),
+    "IFR":  ("Poor conditions — instruments required",              "red"),
+    "LIFR": ("Very poor conditions — extremely low visibility",     "purple"),
 }
 
 
+# ── Main decoder ──────────────────────────────────────────────────────────────
+
 def build_readable(data):
+    """
+    Convert a raw METAR JSON object (as returned by aviationweather.gov) into
+    a dictionary of plain-English values ready for the template.
+
+    Args:
+        data: Single METAR record dict from the API response list.
+
+    Returns:
+        dict with keys: station, name, time, temp_f, temp_c, dewp_f, dewp_c,
+        humidity_note, wind, visibility, sky, phenomena, pressure,
+        pressure_note, flight_category, flight_category_desc,
+        flight_category_color, headline, raw.
+    """
     out = {
         "raw":     data.get("rawOb", ""),
         "station": data.get("icaoId", ""),
         "name":    data.get("name", ""),
     }
 
-    # Time — ISO format: "2026-05-18T09:00:00.000Z"
+    # Observation time — API returns ISO-8601 format
     report_time = data.get("reportTime", "")
     if report_time:
         try:
@@ -153,7 +189,7 @@ def build_readable(data):
             else:
                 out["humidity_note"] = "Relatively dry air"
 
-    # Wind
+    # Wind — wgst (gusts) is only present when gusting
     wdir = data.get("wdir")
     wspd = data.get("wspd")
     wgst = data.get("wgst")
@@ -167,7 +203,7 @@ def build_readable(data):
         if wgst:
             out["wind"] += f", gusting to {knots_to_mph(wgst)} mph ({wgst} knots)"
 
-    # Visibility
+    # Visibility — API returns "10+" for >10 SM, or a numeric string/float
     visib = data.get("visib")
     if visib is not None:
         if str(visib) == "10+":
@@ -181,15 +217,14 @@ def build_readable(data):
             except (ValueError, TypeError):
                 out["visibility"] = str(visib)
 
-    # Sky conditions — use `cover` + `clouds` array (base, not cloudBase)
-    cover = data.get("cover")
-    clouds = data.get("clouds", []) or []
-    out["sky"] = decode_sky_conditions(cover, clouds)
+    # Sky conditions — API provides a top-level `cover` code and a `clouds`
+    # array with individual layer altitudes
+    out["sky"] = decode_sky_conditions(data.get("cover"), data.get("clouds") or [])
 
-    # Weather phenomena
+    # Present weather (rain, fog, snow, etc.)
     out["phenomena"] = decode_wx_string(data.get("wxString"))
 
-    # Pressure — altim is in hPa; convert to inHg for display
+    # Altimeter — API returns hPa; convert to inHg for US audiences
     altim_hpa = data.get("altim")
     if altim_hpa:
         inhg = hpa_to_inhg(altim_hpa)
@@ -201,7 +236,7 @@ def build_readable(data):
         else:
             out["pressure_note"] = "Normal pressure"
 
-    # Flight category — field is `fltCat` (capital C)
+    # Flight category (VFR / MVFR / IFR / LIFR)
     fltcat = data.get("fltCat")
     if fltcat and fltcat in FLIGHT_CATEGORIES:
         desc, color = FLIGHT_CATEGORIES[fltcat]
@@ -214,6 +249,7 @@ def build_readable(data):
 
 
 def _make_headline(d):
+    """Build a short one-line summary shown at the top of the results card."""
     parts = []
     sky = d.get("sky", "")
     phenomena = d.get("phenomena")
@@ -239,7 +275,6 @@ def _make_headline(d):
     if "calm" in wind.lower():
         parts.append("calm winds")
     elif wind:
-        # Trim to "From the South at 10 mph" style
         at_idx = wind.find(" at ")
         if at_idx != -1:
             end = wind.find(",", at_idx)
@@ -249,8 +284,14 @@ def _make_headline(d):
     return " · ".join(parts)
 
 
+# ── Route ─────────────────────────────────────────────────────────────────────
+
 @app.route("/", methods=["GET", "POST"])
 def index():
+    """
+    Home page. GET renders the empty search form; POST fetches and decodes
+    the METAR for the submitted airport code.
+    """
     weather = None
     error = None
     airport_code = ""
@@ -262,9 +303,8 @@ def index():
         if not raw_input:
             error = "Please enter an airport code."
         else:
-            code = raw_input
-            if len(code) == 3 and code.isalpha():
-                code = "K" + code
+            # Accept 3-letter US codes by prepending the standard ICAO 'K' prefix
+            code = "K" + raw_input if (len(raw_input) == 3 and raw_input.isalpha()) else raw_input
 
             try:
                 resp = requests.get(
@@ -274,7 +314,7 @@ def index():
                 )
                 resp.raise_for_status()
 
-                # 204 No Content means valid request but no data for that station
+                # 204 No Content means the station code was not found
                 if resp.status_code == 204 or not resp.content.strip():
                     error = (
                         f'No METAR data found for "{raw_input}". '
